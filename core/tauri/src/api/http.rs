@@ -1,4 +1,4 @@
-// Copyright 2019-2022 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
@@ -159,15 +159,16 @@ impl Client {
 
     let response = if let Some(body) = request.body {
       match body {
-        Body::Bytes(data) => request_builder.body(attohttpc::body::Bytes(data)).send()?,
-        Body::Text(text) => request_builder.body(attohttpc::body::Bytes(text)).send()?,
-        Body::Json(json) => request_builder.json(&json)?.send()?,
+        Body::Bytes(data) => request_builder.body(attohttpc::body::Bytes(data)).danger_accept_invalid_certs(request.accept_invalid_certs.unwrap_or(false)).send()?,
+        Body::Text(text) => request_builder.body(attohttpc::body::Bytes(text)).danger_accept_invalid_certs(request.accept_invalid_certs.unwrap_or(false)).send()?,
+        Body::Json(json) => request_builder.json(&json)?.danger_accept_invalid_certs(request.accept_invalid_certs.unwrap_or(false)).send()?,
         Body::Form(form_body) => {
           #[allow(unused_variables)]
           fn send_form(
             request_builder: attohttpc::RequestBuilder,
             headers: &Option<HeaderMap>,
             form_body: FormBody,
+            accept_invalid_certs:bool,
           ) -> crate::api::Result<attohttpc::Response> {
             #[cfg(feature = "http-multipart")]
             if matches!(
@@ -208,7 +209,7 @@ impl Client {
               }
               return request_builder
                 .body(multipart.build()?)
-                .send()
+                .danger_accept_invalid_certs(request.accept_invalid_certs.unwrap_or(false)).send()
                 .map_err(Into::into);
             }
 
@@ -222,14 +223,14 @@ impl Client {
                 FormPart::Text(value) => form.push((name, value)),
               }
             }
-            request_builder.form(&form)?.send().map_err(Into::into)
+            request_builder.form(&form)?.danger_accept_invalid_certs(accept_invalid_certs).send().map_err(Into::into)
           }
 
-          send_form(request_builder, &request.headers, form_body)?
+          send_form(request_builder, &request.headers, form_body, request.accept_invalid_certs.unwrap_or(false))?
         }
       }
     } else {
-      request_builder.send()?
+      request_builder.danger_accept_invalid_certs(request.accept_invalid_certs.unwrap_or(false)).send()?
     };
 
     Ok(Response(
@@ -368,7 +369,7 @@ impl TryFrom<FilePart> for Vec<u8> {
   type Error = crate::api::Error;
   fn try_from(file: FilePart) -> crate::api::Result<Self> {
     let bytes = match file {
-      FilePart::Path(path) => std::fs::read(&path)?,
+      FilePart::Path(path) => std::fs::read(path)?,
       FilePart::Contents(bytes) => bytes,
     };
     Ok(bytes)
@@ -441,8 +442,7 @@ impl<'de> Deserialize<'de> for HeaderMap {
         headers.insert(key, value);
       } else {
         return Err(serde::de::Error::custom(format!(
-          "invalid header `{}` `{}`",
-          key, value
+          "invalid header `{key}` `{value}`"
         )));
       }
     }
@@ -487,6 +487,8 @@ pub struct HttpRequestBuilder {
   pub timeout: Option<Duration>,
   /// The response type (defaults to Json)
   pub response_type: Option<ResponseType>,
+  ///PTATCH: accept invalid certs (default false)
+  pub accept_invalid_certs: Option<bool>,
 }
 
 impl HttpRequestBuilder {
@@ -500,6 +502,7 @@ impl HttpRequestBuilder {
       body: None,
       timeout: None,
       response_type: None,
+      accept_invalid_certs: None,
     })
   }
 
@@ -553,6 +556,13 @@ impl HttpRequestBuilder {
   #[must_use]
   pub fn response_type(mut self, response_type: ResponseType) -> Self {
     self.response_type = Some(response_type);
+    self
+  }
+
+  /// Sets accept_invalid_certs
+  #[must_use]
+  pub fn accept_invalid_certs(mut self, accept_invalid_certs: bool) -> Self {
+    self.accept_invalid_certs = Some(accept_invalid_certs);
     self
   }
 }
@@ -662,7 +672,7 @@ impl Response {
     let data = match self.0 {
       ResponseType::Json => self.1.json()?,
       ResponseType::Text => Value::String(self.1.text()?),
-      ResponseType::Binary => serde_json::to_value(&self.1.bytes()?)?,
+      ResponseType::Binary => serde_json::to_value(self.1.bytes()?)?,
     };
 
     Ok(ResponseData {
