@@ -230,7 +230,7 @@ impl Client {
         }
       }
     } else {
-      request_builder.danger_accept_invalid_certs(request.accept_invalid_certs.unwrap_or(false)).send()?
+      request_builder.danger_accept_invalid_certs(request.accept_invalid_certs.unwrap_or(false)).allow_compression(false).send()?
     };
 
     Ok(Response(
