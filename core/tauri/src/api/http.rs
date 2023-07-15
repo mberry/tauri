@@ -210,8 +210,8 @@ impl Client {
               }
               return request_builder
                 .body(multipart.build()?)
-                .danger_accept_invalid_certs(request.accept_invalid_certs.unwrap_or(false))
-                .allow_compression(request.allow_compression.unwrap_or(true))
+                .danger_accept_invalid_certs(accept_invalid_certs)
+                .allow_compression(allow_compression)
                 .send()
                 .map_err(Into::into);
             }
