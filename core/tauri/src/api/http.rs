@@ -4,6 +4,7 @@
 
 //! Types and functions related to HTTP request.
 
+use attohttpc::ProxySettings;
 use http::Method;
 pub use http::StatusCode;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -155,6 +156,10 @@ impl Client {
 
     if let Some(timeout) = request.timeout {
       request_builder = request_builder.timeout(timeout);
+    }
+
+    if let Some(proxy) = request.proxy {
+      request_builder = request_builder.proxy_settings(proxy.convert());
     }
 
     let response = if let Some(body) = request.body {
@@ -486,6 +491,8 @@ pub struct HttpRequestBuilder {
   pub timeout: Option<Duration>,
   /// The response type (defaults to Json)
   pub response_type: Option<ResponseType>,
+  /// Proxy settings
+  pub proxy: Option<Proxy>,
 }
 
 impl HttpRequestBuilder {
@@ -499,6 +506,7 @@ impl HttpRequestBuilder {
       body: None,
       timeout: None,
       response_type: None,
+      proxy: None,
     })
   }
 
@@ -552,6 +560,12 @@ impl HttpRequestBuilder {
   #[must_use]
   pub fn response_type(mut self, response_type: ResponseType) -> Self {
     self.response_type = Some(response_type);
+    self
+  }
+
+  /// Sets the proxy settings for the request
+  pub fn proxy(mut self, proxy: Proxy) -> Self {
+    self.proxy = Some(proxy);
     self
   }
 }
@@ -713,5 +727,260 @@ mod test {
         connect_timeout: Option::arbitrary(g),
       }
     }
+  }
+}
+
+/// Proxy params from frontend
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Proxy {
+  mode: Mode,
+  server: Server
+}
+
+/// Proxy type to use
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+pub enum Mode {
+  /// Do not proxy any requests
+  NoProxy,
+  /// Load environmental variables
+  Env,
+  /// Custom proxy server
+  Custom
+}
+
+impl Default for Mode {
+  fn default() -> Self {
+    Self::NoProxy
+  }
+}
+
+/// Which type of traffic to intercept
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+pub enum Intercepts {
+  /// HTTP Only
+  Http,
+  /// HTTPS Only
+  Https,
+  /// Both HTTPS and HTTP
+  HttpHttps
+}
+
+impl Default for Intercepts {
+  fn default() -> Self {
+    Self::HttpHttps
+  }
+}
+
+impl PartialEq<str> for Intercepts {
+  /// Equality test assumes that only 'http' or 'https' strings are ever tested
+  fn eq(&self, other: &str) -> bool {
+    match self {
+      Intercepts::Http => other.eq_ignore_ascii_case("http"),
+      Intercepts::Https => other.eq_ignore_ascii_case("https"),
+      Intercepts::HttpHttps => true,
+    }
+  }
+}
+
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Server {
+  pub protocol: String,
+  pub host: String,
+  pub port: Option<u16>,
+  pub intercepts: Intercepts,
+  pub bypass: Vec<String>,
+  pub password: Option<String>,
+  pub username: Option<String>,
+  pub destination: Url,
+}
+
+impl Proxy {
+  /// Handle frontend proxy logic and convert to a attohttpc ProxySettings struct
+  /// NO_PROXY -> Set attohttpc to disable proxying
+  /// ENV -> Load Envinronment Variables
+  /// CUSTOM -> Use proxy.server fields
+  fn convert(&self) -> ProxySettings {
+    match self.mode {
+        Mode::NoProxy => ProxySettings::builder().build(),
+        Mode::Env => ProxySettings::from_env(),
+        Mode::Custom => {
+          let mut settings = ProxySettings::builder();
+
+          // Add any hosts to bypass proxy server
+          for bypass_host in self.server.bypass.clone() {
+            settings = settings.add_no_proxy_host(bypass_host);
+          }
+          // Set port if it exists otherwise use protocol default
+          let port = if self.server.protocol.eq_ignore_ascii_case("https") {
+            self.server.port.unwrap_or(443)
+          } else {
+            self.server.port.unwrap_or(80)
+          };
+          // Determine whether to intercept request
+          let scheme = self.server.destination.scheme();
+          if self.server.intercepts == *scheme {
+            // TODO: Error Handling
+            let mut url = Url::parse(&self.server.host).unwrap();
+            url.set_port(Some(port)).unwrap();
+
+            match self.server.intercepts {
+              Intercepts::Http => {
+                settings = settings.http_proxy(url);
+              },
+              Intercepts::Https => {
+                settings = settings.https_proxy(url);
+              },
+              Intercepts::HttpHttps => {
+                settings = settings.http_proxy(url.clone());
+                settings = settings.https_proxy(url);
+              }
+            }
+          }
+          settings.build()
+        },
+    }
+  }
+}
+
+
+#[cfg(test)]
+mod tests {
+  use crate::api::http::*;
+  use url::Url;
+
+  #[test]
+  fn test_intercepts_eq() {
+    assert_eq!(Intercepts::Http.eq("http"), true);
+    assert_eq!(Intercepts::Http.eq("https"), false);
+    assert_eq!(Intercepts::Https.eq("http"), false);
+    assert_eq!(Intercepts::Https.eq("https"), true);
+    assert_eq!(Intercepts::HttpHttps.eq("http"), true);
+    assert_eq!(Intercepts::HttpHttps.eq("https"), true);
+  }
+
+  #[test]
+  fn no_proxy() {
+      let proxy = Proxy {
+          mode: Mode::NoProxy,
+          server: Server {
+              protocol: String::from("http"),
+              host: String::from("http://proxy.example.com"),
+              port: None,
+              intercepts: Intercepts::Http,
+              bypass: vec![],
+              password: None,
+              username: None,
+              destination: Url::parse("http://example.com/dest").unwrap(),
+          },
+      };
+
+      let proxy_settings = proxy.convert();
+      // No proxy server url's should be returned in this mode
+      assert!(proxy_settings.for_url(&proxy.server.destination).is_none());
+  }
+
+  #[test]
+  fn http_proxy() {
+      let mut proxy = Proxy {
+          mode: Mode::Custom,
+          server: Server {
+              protocol: String::from("http"),
+              host: String::from("http://proxy.example.com"),
+              port: Some(8080),
+              intercepts: Intercepts::Http,
+              bypass: vec![],
+              password: None,
+              username: None,
+              destination: Url::parse("http://example.com/dest").unwrap(),
+          },
+      };
+
+      // http destination gets proxied
+      let mut proxy_settings = proxy.convert();
+      assert!(proxy_settings.for_url(&proxy.server.destination).is_some());
+      // https doesn't
+      proxy.server.destination = Url::parse("https://google.com").unwrap();
+      proxy_settings = proxy.convert();
+      assert!(proxy_settings.for_url(&proxy.server.destination).is_none());
+  }
+
+  #[test]
+  fn https_proxy() {
+      let mut proxy = Proxy {
+          mode: Mode::Custom,
+          server: Server {
+              protocol: String::from("http"),
+              host: String::from("http://proxy.example.com"),
+              port: Some(8080),
+              intercepts: Intercepts::Https,
+              destination: Url::parse("http://example.com/dest").unwrap(),
+              password: None,
+              username: None,
+              bypass: vec![]
+          },
+      };
+
+      // http destinations not proxied
+      let mut proxy_settings = proxy.convert();
+      assert!(proxy_settings.for_url(&proxy.server.destination).is_none());
+
+      proxy.server.destination = Url::parse("https://google.com").unwrap();
+      proxy_settings = proxy.convert();
+      assert!(proxy_settings.for_url(&proxy.server.destination).is_some());
+  }
+
+  #[test]
+  fn http_https_proxy() {
+      let proxy = Proxy {
+          mode: Mode::Custom,
+          server: Server {
+              protocol: String::from("http"),
+              host: String::from("http://proxy.example.com"),
+              port: Some(8080),
+              intercepts: Intercepts::HttpHttps,
+              destination: Url::parse("http://example.com/dest").unwrap(),
+              password: None,
+              username: None,
+              bypass: vec![]
+          },
+      };
+
+      // Both are proxied
+      let proxy_settings = proxy.convert();
+      assert!(proxy_settings.for_url(&proxy.server.destination).is_some());
+      let https_url = Url::parse("https://google.com").unwrap();
+      assert!(proxy_settings.for_url(&https_url).is_some());
+  }
+
+  #[test]
+  fn bypass_proxy() {
+      let proxy = Proxy {
+          mode: Mode::Custom,
+          server: Server {
+              protocol: String::from("http"),
+              host: String::from("http://proxy.example.com"),
+              port: Some(8080),
+              intercepts: Intercepts::HttpHttps,
+              destination: Url::parse("http://example.com/dest").unwrap(),
+              password: None,
+              username: None,
+              bypass: vec![String::from("localhost"), String::from("127.0.0.1")],
+          },
+      };
+
+      // Both are proxied
+      let proxy_settings = proxy.convert();
+      let bypass_url = Url::parse("http://localhost/dest").unwrap();
+      assert!(proxy_settings.for_url(&bypass_url).is_none());
+
+      let http_url = Url::parse("https://google.com").unwrap();
+      let http_proxy = proxy_settings.for_url(&http_url);
+      assert!(http_proxy.is_some());
+
+      let https_url = Url::parse("https://google.com").unwrap();
+      let https_proxy = proxy_settings.for_url(&https_url);
+      assert!(https_proxy.is_some());
+
   }
 }

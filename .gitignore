@@ -65,6 +65,7 @@ typings/
 debug.log
 package-lock.json
 .vscode/settings.json
+.vscode/launch.json
 */.vscode/
 proptest-regressions/
 TODO.md
@@ -87,3 +88,4 @@ test_video.mp4
 # old cli directories
 /tooling/cli.js
 /tooling/cli.rs
+
