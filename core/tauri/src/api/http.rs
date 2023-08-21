@@ -763,8 +763,10 @@ mod test {
 /// Proxy params from frontend
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Proxy {
-  mode: Mode,
-  server: Server
+  /// Proxy type
+  pub mode: Mode,
+  /// Configuration settings
+  pub server: Server
 }
 
 /// Proxy type to use
@@ -784,7 +786,7 @@ impl Default for Mode {
   }
 }
 
-/// Which type of traffic to intercept
+/// Proxy traffic to intercept
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub enum Intercepts {
   /// HTTP Only
@@ -812,16 +814,96 @@ impl PartialEq<str> for Intercepts {
   }
 }
 
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct Server {
+/// Configuration for the request proxy server
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+pub struct Server {
+  /// Either 'http' or 'https'
   pub protocol: String,
+  /// Proxy server URL
   pub host: String,
+  /// Proxy Port, defaults to 80/443 if left unset
   pub port: Option<u16>,
+  /// Traffic types to pass to the proxy
   pub intercepts: Intercepts,
+  /// List of urls to bypass
   pub bypass: Vec<String>,
-  pub password: Option<String>,
+  /// Proxy auth username
   pub username: Option<String>,
+  ///. Proxy auth password
+  pub password: Option<String>,
+}
+
+impl Server {
+  /// Instantiates a new proxy server configuation with minimum required fields
+  ///
+  /// # Example
+  ///
+  /// ```
+  /// # use tauri::api::http::{Server, Intercepts};
+  /// let protocol = "https".to_string();
+  /// let host = "https://proxy.example.com".to_string();
+  /// let server = Server::new(protocol, host , Intercepts::Http);
+  /// ```
+  pub fn new(protocol: String, host: String, intercepts: Intercepts) -> Self {
+    Self {protocol, host, intercepts, ..Default::default()}
+  }
+
+  /// Sets proxy port
+  ///
+  /// # Example
+  ///
+  /// ```
+  /// # use tauri::api::http::{Server, Intercepts};
+  /// # let mut server = Server::new("https".to_string(), "https://proxy.example.com".to_string() , Intercepts::Http);
+  /// server.set_port(8080);
+  /// # assert!(server.port.is_some());
+  /// ```
+  pub fn set_port(&mut self, port: u16) {
+    self.port = Some(port);
+  }
+
+  /// Reverts to default port settings
+  ///
+  /// # Example
+  ///
+  /// ```
+  /// # use tauri::api::http::{Server, Intercepts};
+  /// # let mut server = Server::new("https".to_string(), "https://proxy.example.com".to_string() , Intercepts::Http);
+  /// server.clear_port();
+  /// # assert!(server.port.is_none());
+  /// ```
+  pub fn clear_port(&mut self) {
+    self.port = None;
+  }
+
+  /// Adds a url to the bypass list
+  ///
+  /// # Example
+  ///
+  /// ```
+  /// # use tauri::api::http::{Server, Intercepts};
+  /// # let mut server = Server::new("https".to_string(), "https://proxy.example.com".to_string() , Intercepts::Http);
+  /// server.add_bypass_url("https://www.google.com".to_string());
+  /// # assert!(server.bypass.len() > 0);
+  /// ```
+  pub fn add_bypass_url(&mut self, url: String) {
+    self.bypass.push(url);
+  }
+
+  /// Sets the proxy server username and password
+  ///
+  /// # Example
+  ///
+  /// ```
+  /// # use tauri::api::http::{Server, Intercepts};
+  /// # let mut server = Server::new("https".to_string(), "https://proxy.example.com".to_string() , Intercepts::Http);
+  /// server.set_auth("admin".to_string(), "hunter2".to_string());
+  /// # assert!(server.username.is_some() && server.password.is_some());
+  /// ```
+  pub fn set_auth(&mut self, username: String, password: String) {
+    self.username = Some(username);
+    self.password = Some(password);
+  }
 }
 
 impl Proxy {
