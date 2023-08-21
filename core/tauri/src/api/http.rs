@@ -160,6 +160,9 @@ impl Client {
 
     if let Some(proxy) = request.proxy {
       request_builder = request_builder.proxy_settings(proxy.convert());
+      if let Some(username) = proxy.server.username {
+        request_builder = request_builder.basic_auth(username, proxy.server.password)
+      }
     }
 
     let response = if let Some(body) = request.body {
@@ -843,7 +846,6 @@ impl Proxy {
   }
 }
 
-
 #[cfg(test)]
 mod tests {
   use crate::api::http::*;
@@ -896,10 +898,9 @@ mod tests {
           },
       };
 
-      // http destination gets proxied
+      // HTTP destinations are proxied
       let mut proxy_settings = proxy.convert();
       assert!(proxy_settings.for_url(&proxy.server.destination).is_some());
-      // https doesn't
       proxy.server.destination = Url::parse("https://google.com").unwrap();
       proxy_settings = proxy.convert();
       assert!(proxy_settings.for_url(&proxy.server.destination).is_none());
@@ -921,7 +922,7 @@ mod tests {
           },
       };
 
-      // http destinations not proxied
+      // HTTP destinations not proxied
       let mut proxy_settings = proxy.convert();
       assert!(proxy_settings.for_url(&proxy.server.destination).is_none());
 
@@ -969,7 +970,6 @@ mod tests {
           },
       };
 
-      // Both are proxied
       let proxy_settings = proxy.convert();
       let bypass_url = Url::parse("http://localhost/dest").unwrap();
       assert!(proxy_settings.for_url(&bypass_url).is_none());
