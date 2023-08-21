@@ -167,15 +167,17 @@ impl Client {
 
     let response = if let Some(body) = request.body {
       match body {
-        Body::Bytes(data) => request_builder.body(attohttpc::body::Bytes(data)).send()?,
-        Body::Text(text) => request_builder.body(attohttpc::body::Bytes(text)).send()?,
-        Body::Json(json) => request_builder.json(&json)?.send()?,
+        Body::Bytes(data) => request_builder.body(attohttpc::body::Bytes(data)).danger_accept_invalid_certs(request.accept_invalid_certs.unwrap_or(false)).allow_compression(request.allow_compression.unwrap_or(true)).send()?,
+        Body::Text(text) => request_builder.body(attohttpc::body::Bytes(text)).danger_accept_invalid_certs(request.accept_invalid_certs.unwrap_or(false)).allow_compression(request.allow_compression.unwrap_or(true)).send()?,
+        Body::Json(json) => request_builder.json(&json)?.danger_accept_invalid_certs(request.accept_invalid_certs.unwrap_or(false)).allow_compression(request.allow_compression.unwrap_or(true)).send()?,
         Body::Form(form_body) => {
           #[allow(unused_variables)]
           fn send_form(
             request_builder: attohttpc::RequestBuilder,
             headers: &Option<HeaderMap>,
             form_body: FormBody,
+            accept_invalid_certs:bool,
+            allow_compression: bool,
           ) -> crate::api::Result<attohttpc::Response> {
             #[cfg(feature = "http-multipart")]
             if matches!(
@@ -216,6 +218,8 @@ impl Client {
               }
               return request_builder
                 .body(multipart.build()?)
+                .danger_accept_invalid_certs(accept_invalid_certs)
+                .allow_compression(allow_compression)
                 .send()
                 .map_err(Into::into);
             }
@@ -230,14 +234,14 @@ impl Client {
                 FormPart::Text(value) => form.push((name, value)),
               }
             }
-            request_builder.form(&form)?.send().map_err(Into::into)
+            request_builder.form(&form)?.danger_accept_invalid_certs(accept_invalid_certs).allow_compression(allow_compression).send().map_err(Into::into)
           }
 
-          send_form(request_builder, &request.headers, form_body)?
+          send_form(request_builder, &request.headers, form_body, request.accept_invalid_certs.unwrap_or(false), request.allow_compression.unwrap_or(true))?
         }
       }
     } else {
-      request_builder.send()?
+      request_builder.danger_accept_invalid_certs(request.accept_invalid_certs.unwrap_or(false)).allow_compression(request.allow_compression.unwrap_or(true)).send()?
     };
 
     Ok(Response(
@@ -494,6 +498,11 @@ pub struct HttpRequestBuilder {
   pub timeout: Option<Duration>,
   /// The response type (defaults to Json)
   pub response_type: Option<ResponseType>,
+  ///PTATCH: accept invalid certs (default false)
+  pub accept_invalid_certs: Option<bool>,
+
+  /// should we enable compression for this request or not
+  pub allow_compression: Option<bool>,
   /// Proxy settings
   pub proxy: Option<Proxy>,
 }
@@ -509,6 +518,8 @@ impl HttpRequestBuilder {
       body: None,
       timeout: None,
       response_type: None,
+      accept_invalid_certs: None,
+      allow_compression: None,
       proxy: None,
     })
   }
@@ -563,6 +574,20 @@ impl HttpRequestBuilder {
   #[must_use]
   pub fn response_type(mut self, response_type: ResponseType) -> Self {
     self.response_type = Some(response_type);
+    self
+  }
+
+  /// Sets accept_invalid_certs
+  #[must_use]
+  pub fn accept_invalid_certs(mut self, accept_invalid_certs: bool) -> Self {
+    self.accept_invalid_certs = Some(accept_invalid_certs);
+    self
+  }
+
+  /// Sets allow_compression
+  #[must_use]
+  pub fn allow_compression(mut self, allow_compression: bool) -> Self {
+    self.allow_compression = Some(allow_compression);
     self
   }
 
