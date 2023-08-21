@@ -140,7 +140,7 @@ updater = [
   "dialog-ask",
   "fs-extract-api"
 ]
-http-api = [ "attohttpc" ]
+http-api = [ "attohttpc", "base64" ]
 http-multipart = [ "attohttpc/multipart-form", "reqwest/multipart" ]
 shell-open-api = [ "open", "regex", "tauri-macros/shell-scope" ]
 fs-extract-api = [ "zip" ]
