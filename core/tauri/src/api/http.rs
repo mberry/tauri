@@ -12,7 +12,7 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use url::Url;
 use attohttpc::ProxySettings;
 
-use std::{collections::HashMap, path::PathBuf, time::Duration};
+use std::{collections::HashMap, path::PathBuf, time::Duration, env};
 
 #[cfg(feature = "reqwest-client")]
 pub use reqwest::header;
@@ -917,14 +917,43 @@ impl Proxy {
   fn convert(&self) -> crate::api::Result<ProxySettings>  {
     match self.mode {
       Mode::NoProxy => Ok(ProxySettings::builder().build()),
-      Mode::Env => Ok(ProxySettings::from_env()),
+      Mode::Env => {
+        let mut settings = ProxySettings::builder();
+        if let Ok(disable) = env::var("NO_PROXY") {
+          if disable == "*" {
+            return Ok(settings.build())
+          } else {
+            for bypass_host in disable.split(",") {
+              settings = settings.add_no_proxy_host(bypass_host);
+            }
+          }
+        }
+        if let Ok(all) = env::var("ALL_PROXY") {
+          let all_url = Url::parse(&all)?;
+          settings = settings.http_proxy(all_url.clone());
+          settings = settings.https_proxy(all_url);
+        }
+        if let Ok(http) = env::var("HTTP_PROXY") {
+          let http_url = Url::parse(&http)?;
+          settings = settings.http_proxy(http_url);
+        }
+        if let Ok(https) = env::var("HTTPS_PROXY") {
+          let http_url = Url::parse(&https)?;
+          settings = settings.https_proxy(http_url);
+        }
+        Ok(settings.build())
+       },
       Mode::Custom => {
         let mut settings = ProxySettings::builder();
         if let Some(server) = &self.server {
           // Add any hosts to bypass proxy server
           if let Some(bypass) = server.bypass.clone() {
-            for bypass_host in bypass.split(",") {
-              settings = settings.add_no_proxy_host(bypass_host);
+            if bypass == "*" {
+              return Ok(settings.build())
+            } else {
+              for bypass_host in bypass.split(",") {
+                settings = settings.add_no_proxy_host(bypass_host);
+              }
             }
           }
           // Set port if it exists otherwise use protocol default
@@ -933,6 +962,7 @@ impl Proxy {
           } else {
             server.port.unwrap_or(80)
           };
+          dbg!(&port);
           // Build host URL
           let proxy_url = format!("{}://{}", server.protocol, &server.host);
           let mut host = Url::parse(&proxy_url)?;
@@ -952,6 +982,7 @@ impl Proxy {
               settings = settings.https_proxy(host);
             }
           }
+          dbg!(&settings);
           Ok(settings.build())
         } else {
           Err(crate::api::Error::ProxyServer)
