@@ -798,10 +798,13 @@ impl Default for Mode {
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub enum Intercepts {
   /// HTTP Only
+  #[serde(rename = "HTTP")]
   Http,
   /// HTTPS Only
+  #[serde(rename = "HTTPS")]
   Https,
   /// Both HTTPS and HTTP
+  #[serde(rename = "HTTP_HTTPS")]
   HttpHttps
 }
 
