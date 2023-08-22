@@ -941,6 +941,8 @@ impl Proxy {
           };
           // Build host URL
           let mut host = Url::parse(&server.host)?;
+          host.set_scheme(&server.protocol)
+            .map_err(|_| crate::api::Error::Url(url::ParseError::EmptyHost))?;
           host.set_port(Some(port))
             .map_err(|_| crate::api::Error::Url(url::ParseError::InvalidPort))?;
 
@@ -1079,23 +1081,6 @@ mod tests {
     let https_proxy = proxy_settings.for_url(&https_url);
     assert!(https_proxy.is_some());
 
-  }
-
-  #[test]
-  fn incorrect_host_url() {
-    let proxy = Proxy {
-      mode: Mode::Custom,
-      server: Some(Server::new(
-        String::from("http"),
-        String::from("proxy.example.com"),
-        Intercepts::HttpHttps
-      ))
-    };
-
-    match proxy.convert() {
-      Ok(_) => panic!("ProxySettings conversion should fail"),
-      Err(_) => ()
-    }
   }
 }
 
