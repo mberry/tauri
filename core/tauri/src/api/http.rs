@@ -841,7 +841,7 @@ pub struct Server {
   /// Traffic types to pass to the proxy
   pub intercepts: Intercepts,
   /// List of urls to bypass
-  pub bypass: Vec<String>,
+  pub bypass: Option<Vec<String>>,
   /// Proxy auth username
   pub username: Option<String>,
   ///. Proxy auth password
@@ -902,7 +902,10 @@ impl Server {
   /// # assert!(server.bypass.len() > 0);
   /// ```
   pub fn add_bypass_url(&mut self, url: String) {
-    self.bypass.push(url);
+    match self.bypass {
+      Some(ref mut bypass) => bypass.push(url),
+      None => self.bypass = Some(vec![url])
+    }
   }
 
   /// Sets the proxy server username and password
@@ -934,8 +937,10 @@ impl Proxy {
         let mut settings = ProxySettings::builder();
         if let Some(server) = &self.server {
           // Add any hosts to bypass proxy server
-          for bypass_host in server.bypass.clone() {
-            settings = settings.add_no_proxy_host(bypass_host);
+          if let Some(bypass) = server.bypass.clone() {
+            for bypass_host in bypass.clone() {
+              settings = settings.add_no_proxy_host(bypass_host);
+            }
           }
           // Set port if it exists otherwise use protocol default
           let port = if server.protocol.eq_ignore_ascii_case("https") {
