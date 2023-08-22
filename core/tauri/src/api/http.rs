@@ -158,11 +158,13 @@ impl Client {
       request_builder = request_builder.timeout(timeout);
     }
 
-    // Add Proxy auth headers if they don't already exist
-    if let Some(headers) = &request.headers {
-      if !headers.0.contains_key("Proxy-Authorization") {
-        if let Some(proxy) = request.proxy {
-          request_builder = request_builder.proxy_settings(proxy.convert()?);
+    if let Some(proxy) = request.proxy {
+      let settings = proxy.convert()?;
+      request_builder = request_builder.proxy_settings(settings);
+
+      // Add Proxy auth headers if they don't already exist
+      if let Some(headers) = &request.headers {
+        if !headers.0.contains_key("Proxy-Authorization") {
           if let Some(server) = proxy.server {
             // Assumes password exists if username exists
             if let Some(username) = server.username {
@@ -174,7 +176,6 @@ impl Client {
         }
       }
     }
-
 
     let response = if let Some(body) = request.body {
       match body {
@@ -916,12 +917,7 @@ impl Proxy {
   fn convert(&self) -> crate::api::Result<ProxySettings>  {
     match self.mode {
       Mode::NoProxy => Ok(ProxySettings::builder().build()),
-      Mode::Env => {
-        println!("{:?}", std::env::var("HTTP_PROXY"));
-        Ok(
-          ProxySettings::from_env()
-        )
-      }
+      Mode::Env => Ok(ProxySettings::from_env()),
       Mode::Custom => {
         let mut settings = ProxySettings::builder();
         if let Some(server) = &self.server {
@@ -990,6 +986,18 @@ mod tests {
     let destination = Url::parse("http://example.com/dest").unwrap();
     // No proxy server url's should be returned in this mode
     assert!(proxy_settings.for_url(&destination).is_none());
+  }
+
+  #[test]
+  fn env_proxy() {
+    let proxy = Proxy {
+      mode: Mode::Env,
+      server: None
+    };
+    std::env::set_var("HTTP_PROXY", "http://localhost:4000");
+    let proxy_settings = proxy.convert().unwrap();
+    let url = Url::parse("http://neverssl.com").unwrap();
+    assert!(proxy_settings.for_url(&url).is_some());
   }
 
   #[test]
