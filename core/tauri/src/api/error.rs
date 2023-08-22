@@ -82,6 +82,9 @@ pub enum Error {
   #[cfg_attr(doc_cfg, doc(cfg(feature = "cli")))]
   #[error("failed to parse CLI arguments: {0}")]
   ParseCliArguments(String),
+  /// No proxy server configuration
+  #[error("Proxy Server Configuarion not found")]
+  ProxyServer,
   /// Shell error.
   #[error("shell error: {0}")]
   Shell(String),

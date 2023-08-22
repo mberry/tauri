@@ -163,11 +163,13 @@ impl Client {
       if !headers.0.contains_key("Proxy-Authorization") {
         if let Some(proxy) = request.proxy {
           request_builder = request_builder.proxy_settings(proxy.convert()?);
-          // Assumes password exists if username exists
-          if let Some(username) = proxy.server.username {
-            let password = proxy.server.password.unwrap_or("".to_string());
-            let credentials = base64::encode(format!("{username}:{password}"));
-            request_builder = request_builder.header_append("Proxy-Authorization", format!("Basic {credentials}"))
+          if let Some(server) = proxy.server {
+            // Assumes password exists if username exists
+            if let Some(username) = server.username {
+              let password = server.password.unwrap_or("".to_string());
+              let credentials = base64::encode(format!("{username}:{password}"));
+              request_builder = request_builder.header_append("Proxy-Authorization", format!("Basic {credentials}"))
+            }
           }
         }
       }
@@ -772,7 +774,7 @@ pub struct Proxy {
   /// Proxy type
   pub mode: Mode,
   /// Configuration settings
-  pub server: Server
+  pub server: Option<Server>
 }
 
 /// Proxy type to use
@@ -923,36 +925,39 @@ impl Proxy {
       Mode::Env => Ok(ProxySettings::from_env()),
       Mode::Custom => {
         let mut settings = ProxySettings::builder();
-
-        // Add any hosts to bypass proxy server
-        for bypass_host in self.server.bypass.clone() {
-          settings = settings.add_no_proxy_host(bypass_host);
-        }
-        // Set port if it exists otherwise use protocol default
-        let port = if self.server.protocol.eq_ignore_ascii_case("https") {
-          self.server.port.unwrap_or(443)
-        } else {
-          self.server.port.unwrap_or(80)
-        };
-        // Build host URL
-        let mut host = Url::parse(&self.server.host)?;
-        host.set_port(Some(port))
-          .map_err(|_| crate::api::Error::Url(url::ParseError::InvalidPort))?;
-
-        // Set proxies based on transport type
-        match self.server.intercepts {
-          Intercepts::Http => {
-            settings = settings.http_proxy(host);
-          },
-          Intercepts::Https => {
-            settings = settings.https_proxy(host);
-          },
-          Intercepts::HttpHttps => {
-            settings = settings.http_proxy(host.clone());
-            settings = settings.https_proxy(host);
+        if let Some(server) = &self.server {
+          // Add any hosts to bypass proxy server
+          for bypass_host in server.bypass.clone() {
+            settings = settings.add_no_proxy_host(bypass_host);
           }
+          // Set port if it exists otherwise use protocol default
+          let port = if server.protocol.eq_ignore_ascii_case("https") {
+            server.port.unwrap_or(443)
+          } else {
+            server.port.unwrap_or(80)
+          };
+          // Build host URL
+          let mut host = Url::parse(&server.host)?;
+          host.set_port(Some(port))
+            .map_err(|_| crate::api::Error::Url(url::ParseError::InvalidPort))?;
+
+          // Set proxies based on transport type
+          match server.intercepts {
+            Intercepts::Http => {
+              settings = settings.http_proxy(host);
+            },
+            Intercepts::Https => {
+              settings = settings.https_proxy(host);
+            },
+            Intercepts::HttpHttps => {
+              settings = settings.http_proxy(host.clone());
+              settings = settings.https_proxy(host);
+            }
+          }
+          Ok(settings.build())
+        } else {
+          Err(crate::api::Error::ProxyServer)
         }
-        Ok(settings.build())
       },
     }
   }
@@ -976,11 +981,7 @@ mod tests {
   fn no_proxy() {
     let proxy = Proxy {
       mode: Mode::NoProxy,
-      server: Server::new(
-        String::from("http"),
-        String::from("http://proxy.example.com"),
-        Intercepts::Http
-      )
+      server: None
     };
 
     let proxy_settings = proxy.convert().unwrap();
@@ -993,11 +994,11 @@ mod tests {
   fn http_proxy() {
     let proxy = Proxy {
       mode: Mode::Custom,
-      server: Server::new(
+      server: Some(Server::new(
         String::from("http"),
         String::from("http://proxy.example.com"),
         Intercepts::Http
-      )
+      ))
     };
 
     // HTTP destinations are proxied
@@ -1014,11 +1015,11 @@ mod tests {
   fn https_proxy() {
     let proxy = Proxy {
       mode: Mode::Custom,
-      server: Server::new(
+      server: Some(Server::new(
         String::from("http"),
         String::from("http://proxy.example.com"),
         Intercepts::Https
-      )
+      ))
     };
 
     // HTTP destinations not proxied
@@ -1035,11 +1036,11 @@ mod tests {
   fn http_https_proxy() {
     let proxy = Proxy {
       mode: Mode::Custom,
-      server: Server::new(
+      server: Some(Server::new(
         String::from("http"),
         String::from("http://proxy.example.com"),
         Intercepts::HttpHttps
-      )
+      ))
     };
 
     // Both are proxied
@@ -1054,14 +1055,15 @@ mod tests {
   fn bypass_proxy() {
     let mut proxy = Proxy {
       mode: Mode::Custom,
-      server: Server::new(
+      server: Some(Server::new(
         String::from("http"),
         String::from("http://proxy.example.com"),
         Intercepts::HttpHttps
-      )
+      ))
     };
-    proxy.server.add_bypass_url(String::from("localhost"));
-
+    if let Some(ref mut server) = proxy.server {
+      server.add_bypass_url(String::from("localhost"));
+    }
     let proxy_settings = proxy.convert().unwrap();
     let bypass_url = Url::parse("http://localhost/dest").unwrap();
     assert!(proxy_settings.for_url(&bypass_url).is_none());
@@ -1080,11 +1082,11 @@ mod tests {
   fn incorrect_host_url() {
     let proxy = Proxy {
       mode: Mode::Custom,
-      server: Server::new(
+      server: Some(Server::new(
         String::from("http"),
         String::from("proxy.example.com"),
         Intercepts::HttpHttps
-      )
+      ))
     };
 
     match proxy.convert() {
