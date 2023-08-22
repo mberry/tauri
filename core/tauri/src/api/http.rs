@@ -907,6 +907,7 @@ impl Server {
   }
 }
 
+
 impl Proxy {
   /// Handle frontend proxy logic and convert to a attohttpc ProxySettings struct
   /// NO_PROXY -> Set attohttpc to disable proxying
@@ -915,7 +916,12 @@ impl Proxy {
   fn convert(&self) -> crate::api::Result<ProxySettings>  {
     match self.mode {
       Mode::NoProxy => Ok(ProxySettings::builder().build()),
-      Mode::Env => Ok(ProxySettings::from_env()),
+      Mode::Env => {
+        println!("{:?}", std::env::var("HTTP_PROXY"));
+        Ok(
+          ProxySettings::from_env()
+        )
+      }
       Mode::Custom => {
         let mut settings = ProxySettings::builder();
         if let Some(server) = &self.server {
