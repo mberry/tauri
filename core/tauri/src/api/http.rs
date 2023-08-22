@@ -782,10 +782,13 @@ pub struct Proxy {
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub enum Mode {
   /// Do not proxy any requests
+  #[serde(rename = "NO_PROXY")]
   NoProxy,
   /// Load environmental variables
+  #[serde(rename = "ENV")]
   Env,
   /// Custom proxy server
+  #[serde(rename = "CUSTOM")]
   Custom
 }
 
