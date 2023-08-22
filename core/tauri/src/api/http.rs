@@ -772,6 +772,7 @@ mod test {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Proxy {
   /// Proxy type
+  #[serde(rename = "type")]
   pub mode: Mode,
   /// Configuration settings
   pub server: Option<Server>
