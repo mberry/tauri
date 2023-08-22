@@ -949,9 +949,8 @@ impl Proxy {
             server.port.unwrap_or(80)
           };
           // Build host URL
-          let mut host = Url::parse(&server.host)?;
-          host.set_scheme(&server.protocol)
-            .map_err(|_| crate::api::Error::Url(url::ParseError::EmptyHost))?;
+          let proxy_url = format!("{}://{}", server.protocol, &server.host);
+          let mut host = Url::parse(&proxy_url)?;
           host.set_port(Some(port))
             .map_err(|_| crate::api::Error::Url(url::ParseError::InvalidPort))?;
 
