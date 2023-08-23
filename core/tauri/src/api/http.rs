@@ -935,9 +935,18 @@ impl Proxy {
       },
       Mode::Env => {
         let mut settings = ProxySettings::builder();
-        if let Ok(disable) = env::var("NO_PROXY") {
+        if let Ok(disable) = env::var("no_proxy") {
           if disable == "*" {
             return Ok(settings.build())
+          } else {
+            for bypass_host in disable.split(",") {
+              settings = settings.add_no_proxy_host(bypass_host);
+            }
+          }
+        } else if let Ok(disable) = env::var("NO_PROXY") {
+          if disable == "*" {
+            // Return no_proxy settings
+            return Ok(ProxySettings::builder().build())
           } else {
             for bypass_host in disable.split(",") {
               settings = settings.add_no_proxy_host(bypass_host);
