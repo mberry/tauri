@@ -910,7 +910,9 @@ impl Server {
 
 macro_rules! env_proxy_settings {
   ($env_var:expr, $settings:expr, [ $($method:ident),+ ]) => {
+      println!("Parsing env var: {}", $env_var);
       if let Ok(url_str) = std::env::var($env_var) {
+        println!("Value: {}", url_str);
           let url = url::Url::parse(&url_str)?;
           $(
               $settings = $settings.$method(url.clone());
@@ -946,6 +948,8 @@ impl Proxy {
         env_proxy_settings!("HTTP_PROXY", settings, [ http_proxy ]);
         env_proxy_settings!("HTTPS_PROXY", settings, [ https_proxy ]);
 
+        dbg!(&settings);
+
         Ok(settings.build())
        },
       Mode::Custom => {
@@ -961,11 +965,18 @@ impl Proxy {
               }
             }
           }
-          // Set port if it exists otherwise use protocol default
+          // Handle port being set to 0
+          let mut server_port = server.port.clone();
+          if let Some(port) = server_port {
+            if port == 0 {
+              server_port = None;
+            }
+          }
+          // Use defaults
           let port = if server.protocol.eq_ignore_ascii_case("https") {
-            server.port.unwrap_or(443)
+            server_port.unwrap_or(443)
           } else {
-            server.port.unwrap_or(80)
+            server_port.unwrap_or(80)
           };
           dbg!(&port);
           // Build host URL
