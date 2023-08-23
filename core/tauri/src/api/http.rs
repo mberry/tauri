@@ -908,6 +908,16 @@ impl Server {
   }
 }
 
+macro_rules! env_proxy_settings {
+  ($env_var:expr, $settings:expr, [ $($method:ident),+ ]) => {
+      if let Ok(url_str) = std::env::var($env_var) {
+          let url = url::Url::parse(&url_str)?;
+          $(
+              $settings = $settings.$method(url.clone());
+          )+
+      }
+  };
+}
 
 impl Proxy {
   /// Handle frontend proxy logic and convert to a attohttpc ProxySettings struct
@@ -928,19 +938,13 @@ impl Proxy {
             }
           }
         }
-        if let Ok(all) = env::var("ALL_PROXY") {
-          let all_url = Url::parse(&all)?;
-          settings = settings.http_proxy(all_url.clone());
-          settings = settings.https_proxy(all_url);
-        }
-        if let Ok(http) = env::var("HTTP_PROXY") {
-          let http_url = Url::parse(&http)?;
-          settings = settings.http_proxy(http_url);
-        }
-        if let Ok(https) = env::var("HTTPS_PROXY") {
-          let http_url = Url::parse(&https)?;
-          settings = settings.https_proxy(http_url);
-        }
+
+        env_proxy_settings!("ALL_PROXY", settings, [ http_proxy, https_proxy ]);
+        env_proxy_settings!("http_proxy", settings, [ http_proxy ]);
+        env_proxy_settings!("https_proxy", settings, [ https_proxy ]);
+        env_proxy_settings!("HTTP_PROXY", settings, [ http_proxy ]);
+        env_proxy_settings!("HTTPS_PROXY", settings, [ https_proxy ]);
+
         Ok(settings.build())
        },
       Mode::Custom => {
@@ -1032,12 +1036,32 @@ mod tests {
   }
 
   #[test]
+  fn set_port() {
+    let proxy = Proxy {
+      mode: Mode::Custom,
+      server: Some(Server::new(
+        String::from("http"),
+        String::from("proxy.example.com"),
+        Intercepts::Http
+      ))
+    };
+    // HTTP destinations are proxied
+    let mut proxy_settings = proxy.convert().unwrap();
+    let mut destination = Url::parse("http://example.com/dest").unwrap();
+    assert!(proxy_settings.for_url(&destination).is_some());
+
+    destination = Url::parse("https://google.com").unwrap();
+    proxy_settings = proxy.convert().unwrap();
+    assert!(proxy_settings.for_url(&destination).is_none());
+  }
+
+  #[test]
   fn http_proxy() {
     let proxy = Proxy {
       mode: Mode::Custom,
       server: Some(Server::new(
         String::from("http"),
-        String::from("http://proxy.example.com"),
+        String::from("proxy.example.com"),
         Intercepts::Http
       ))
     };
@@ -1058,7 +1082,7 @@ mod tests {
       mode: Mode::Custom,
       server: Some(Server::new(
         String::from("http"),
-        String::from("http://proxy.example.com"),
+        String::from("proxy.example.com"),
         Intercepts::Https
       ))
     };
@@ -1079,7 +1103,7 @@ mod tests {
       mode: Mode::Custom,
       server: Some(Server::new(
         String::from("http"),
-        String::from("http://proxy.example.com"),
+        String::from("proxy.example.com"),
         Intercepts::HttpHttps
       ))
     };
