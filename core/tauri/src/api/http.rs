@@ -939,6 +939,7 @@ impl Proxy {
           }
         }
 
+        env_proxy_settings!("all_proxy", settings, [ http_proxy, https_proxy ]);
         env_proxy_settings!("ALL_PROXY", settings, [ http_proxy, https_proxy ]);
         env_proxy_settings!("http_proxy", settings, [ http_proxy ]);
         env_proxy_settings!("https_proxy", settings, [ https_proxy ]);
