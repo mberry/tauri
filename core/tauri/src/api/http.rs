@@ -928,7 +928,11 @@ impl Proxy {
   /// CUSTOM -> Use proxy.server fields
   fn convert(&self) -> crate::api::Result<ProxySettings>  {
     match self.mode {
-      Mode::NoProxy => Ok(ProxySettings::builder().build()),
+      Mode::NoProxy => {
+        let settings = ProxySettings::builder().build();
+        dbg!(&settings);
+        Ok(settings)
+      },
       Mode::Env => {
         let mut settings = ProxySettings::builder();
         if let Ok(disable) = env::var("NO_PROXY") {
@@ -943,13 +947,12 @@ impl Proxy {
 
         env_proxy_settings!("all_proxy", settings, [ http_proxy, https_proxy ]);
         env_proxy_settings!("ALL_PROXY", settings, [ http_proxy, https_proxy ]);
-        env_proxy_settings!("http_proxy", settings, [ http_proxy ]);
+        env_proxy_settings!("http_proxy", settings, [ http_proxy, https_proxy ]);
         env_proxy_settings!("https_proxy", settings, [ https_proxy ]);
-        env_proxy_settings!("HTTP_PROXY", settings, [ http_proxy ]);
+        env_proxy_settings!("HTTP_PROXY", settings, [ http_proxy, https_proxy ]);
         env_proxy_settings!("HTTPS_PROXY", settings, [ https_proxy ]);
 
         dbg!(&settings);
-
         Ok(settings.build())
        },
       Mode::Custom => {
