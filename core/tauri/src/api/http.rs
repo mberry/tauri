@@ -160,7 +160,6 @@ impl Client {
 
     if let Some(proxy) = request.proxy {
       let settings = proxy.convert()?;
-      dbg!(&settings);
       request_builder = request_builder.proxy_settings(settings);
       // Add Proxy auth headers if they don't already exist
       if let Some(credentials) = proxy.base64_credentials() {
@@ -169,7 +168,6 @@ impl Client {
         }
       }
     }
-
 
     let response = if let Some(body) = request.body {
       match body {
@@ -931,7 +929,6 @@ impl Proxy {
     match self.mode {
       Mode::NoProxy => {
         let settings = ProxySettings::builder();
-        dbg!(&settings);
         Ok(settings.build())
       },
       Mode::Env => {
@@ -955,7 +952,6 @@ impl Proxy {
         env_proxy_settings!("http_proxy", settings, [ http_proxy, https_proxy ]);
         env_proxy_settings!("HTTPS_PROXY", settings, [ https_proxy ]);
         env_proxy_settings!("https_proxy", settings, [ https_proxy ]);
-        dbg!(&settings);
         Ok(settings.build())
        },
       Mode::Custom => {
@@ -991,7 +987,6 @@ impl Proxy {
           host.set_port(Some(port))
             .map_err(|_| crate::api::Error::Url(url::ParseError::InvalidPort))?;
 
-          dbg!("Proxy URL", &host.as_str());
           // Set proxies based on transport type
           match server.intercepts {
             Intercepts::Http => {
@@ -1005,7 +1000,6 @@ impl Proxy {
               settings = settings.https_proxy(host);
             }
           }
-          dbg!(&settings);
           Ok(settings.build())
         } else {
           Err(crate::api::Error::ProxyServer)
@@ -1247,7 +1241,7 @@ mod tests {
     );
     server.username = Some("user".to_string());
     server.password = Some("pass".to_string());
-    let mut proxy = Proxy {
+    let proxy = Proxy {
       mode: Mode::Custom,
       server: Some(server)
     };
