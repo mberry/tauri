@@ -166,8 +166,10 @@ impl Client {
       dbg!(&creds);
       if let Some(credentials) = creds {
         // Add the credentials to the Proxy-Authorization header if it doesn't already exist
-        if request.headers.is_none() || request.headers.as_ref().map_or(false, |h| h.0.contains_key("Proxy-Authorization")) {
-          request_builder = request_builder.header_append("Proxy-Authorization", format!("Basic {credentials}"))
+        if let Some(headers) = &request.headers {
+          if !headers.0.contains_key("Proxy-Authorization") {
+            request_builder = request_builder.header_append("Proxy-Authorization", format!("Basic {credentials}"))
+          }
         }
       }
     }
