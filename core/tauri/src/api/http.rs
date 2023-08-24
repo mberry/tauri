@@ -162,14 +162,26 @@ impl Client {
 
     // If proxy is set add it to the request
     if let Some(mut proxy) = request.proxy {
-      request_builder = request_builder.proxy_settings(proxy.convert()?);
+      let settings = proxy.convert()?;
+      request_builder = request_builder.proxy_settings(settings.clone());
 
+      // In Env mode, parse env vars for authentication details
       if proxy.mode == Mode::Env {
-        let mut server = Server::new("".to_string(), "".to_string(), Intercepts::default());
-        for env_var in [ "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy" ] {
-          env_proxy_auth(&mut server, env_var)?;
+        // Check if request is to be proxied
+        if settings.for_url(&request.url).is_some() {
+          // Change priority list based on type of request
+          let priority_list = match request.url.scheme() {
+            "http" => vec![ "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy" ],
+            "https" => vec![ "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy" ],
+            _ => vec![]
+          };
+          let mut server = Server::new("".to_string(), "".to_string(), Intercepts::default());
+          for env_var in priority_list {
+            env_proxy_auth(&mut server, env_var)?;
+          }
+          // Set server to populate auth headers
+          proxy.server = Some(server);
         }
-        proxy.server = Some(server);
       }
 
       // Check if any credentials exist
