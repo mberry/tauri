@@ -160,8 +160,16 @@ impl Client {
 
     if let Some(proxy) = request.proxy {
       let settings = proxy.convert()?;
+      dbg!(&settings);
       request_builder = request_builder.proxy_settings(settings);
+      // Add Proxy auth headers if they don't already exist
+      if let Some(credentials) = proxy.base64_credentials() {
+        if request.headers.is_none() || request.headers.as_ref().map_or(false, |h| h.0.contains_key("Proxy-Authorization")) {
+          request_builder = request_builder.header_append("Proxy-Authorization", format!("Basic {credentials}"))
+        }
+      }
     }
+
 
     let response = if let Some(body) = request.body {
       match body {
@@ -983,12 +991,6 @@ impl Proxy {
           host.set_port(Some(port))
             .map_err(|_| crate::api::Error::Url(url::ParseError::InvalidPort))?;
 
-          if let Some(username) = &server.username {
-            host.set_username(&username)
-              .map_err(|_| crate::api::Error::Auth)?;
-          }
-          host.set_password(server.password.as_deref())
-            .map_err(|_| crate::api::Error::Auth)?;
           dbg!("Proxy URL", &host.as_str());
           // Set proxies based on transport type
           match server.intercepts {
@@ -1009,6 +1011,22 @@ impl Proxy {
           Err(crate::api::Error::ProxyServer)
         }
       },
+    }
+  }
+
+  /// Returns the credentials formatted for Basic Auth in base64
+  /// eg. user:pass
+  pub fn base64_credentials(&self) -> Option<String> {
+    if let Some(server) = self.server.clone() {
+      if let Some(username) = server.username {
+        let password = &server.password.unwrap_or("".to_string());
+        Some(base64::encode(format!("{username}:{password}")))
+      } else {
+        None
+      }
+      // Assumes password exists if username exists
+    } else {
+      None
     }
   }
 }
