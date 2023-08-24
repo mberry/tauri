@@ -163,6 +163,8 @@ impl Client {
       request_builder = request_builder.proxy_settings(settings);
     }
 
+    dbg!(&request_builder.inspect());
+
     let response = if let Some(body) = request.body {
       match body {
         Body::Bytes(data) => request_builder.body(attohttpc::body::Bytes(data)).danger_accept_invalid_certs(request.accept_invalid_certs.unwrap_or(false)).allow_compression(request.allow_compression.unwrap_or(true)).send()?,
