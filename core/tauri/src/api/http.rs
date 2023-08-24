@@ -920,9 +920,12 @@ macro_rules! env_proxy_settings {
 }
 
 impl Proxy {
-  /// Handle frontend proxy logic and convert to a attohttpc ProxySettings struct
+  /// Handle Proxy logic and convert struct to attohttpc ProxySettings for the request
+  ///
   /// NO_PROXY -> Set attohttpc to disable proxying
+  ///
   /// ENV -> Load Envinronment Variables
+  ///
   /// CUSTOM -> Use proxy.server fields
   fn convert(&self) -> crate::api::Result<ProxySettings>  {
     match self.mode {
@@ -930,80 +933,97 @@ impl Proxy {
         let settings = ProxySettings::builder();
         Ok(settings.build())
       },
-      Mode::Env => {
-        let mut settings = ProxySettings::builder();
-        // Check "no_proxy" env var, if it doesn't exit check "NO_PROXY"
-        let no_proxy = env::var("no_proxy").or_else(|_| env::var("NO_PROXY"));
-        if let Ok(bypass_list) = no_proxy {
-          // If any value is present check for * to bypass all hosts
-          if bypass_list == "*" {
-            return Ok(settings.build())
-          } else {
-            // Otherwise split the comma delimited list and add them to be bypassed
-            for bypass_host in bypass_list.split(",") {
-              settings = settings.add_no_proxy_host(bypass_host);
-            }
-          }
+      Mode::Env => Proxy::from_env(),
+      Mode::Custom => self.custom(),
+    }
+  }
+
+  /// Handles configuring the proxy from environmental variables.
+  /// Prioritises lowercase over uppercase if both exist.
+  /// If "no_proxy" is set to "*" all hosts will be bypassed
+  /// Otherwise "no_proxy" takes a comma delimited list of hosts to match eg.
+  /// "localhost,noproxy.example.com,google.com"
+  fn from_env() -> crate::api::Result<ProxySettings> {
+    let mut settings = ProxySettings::builder();
+    // Check "no_proxy" env var, if it doesn't exit check "NO_PROXY"
+    let no_proxy = env::var("no_proxy").or_else(|_| env::var("NO_PROXY"));
+    if let Ok(bypass_list) = no_proxy {
+      // If any value is present check for * to bypass all hosts
+      if bypass_list == "*" {
+        return Ok(settings.build())
+      } else {
+        // Otherwise split the comma delimited list and add them to be bypassed
+        for bypass_host in bypass_list.split(",") {
+          settings = settings.add_no_proxy_host(bypass_host);
         }
-        env_proxy_settings!("ALL_PROXY", settings, [ http_proxy, https_proxy ]);
-        env_proxy_settings!("all_proxy", settings, [ http_proxy, https_proxy ]);
-        env_proxy_settings!("HTTP_PROXY", settings, [ http_proxy, https_proxy ]);
-        env_proxy_settings!("http_proxy", settings, [ http_proxy, https_proxy ]);
-        env_proxy_settings!("HTTPS_PROXY", settings, [ https_proxy ]);
-        env_proxy_settings!("https_proxy", settings, [ https_proxy ]);
-        Ok(settings.build())
-       },
-      Mode::Custom => {
-        let mut settings = ProxySettings::builder();
-        if let Some(server) = &self.server {
-          // Add any hosts to bypass proxy server
-          if let Some(bypass) = server.bypass.clone() {
-            if bypass == "*" {
-              return Ok(settings.build())
-            } else {
-              for bypass_host in bypass.split(",") {
-                settings = settings.add_no_proxy_host(bypass_host);
-              }
-            }
-          }
-          // Handle port being set to 0
-          let mut server_port = server.port.clone();
-          if let Some(port) = server_port {
-            if port == 0 {
-              server_port = None;
-            }
-          }
-          // Use defaults if port not set
-          let port = if server.protocol.eq_ignore_ascii_case("https") {
-            server_port.unwrap_or(443)
-          } else {
-            server_port.unwrap_or(80)
-          };
+      }
+    }
+    env_proxy_settings!("ALL_PROXY", settings, [ http_proxy, https_proxy ]);
+    env_proxy_settings!("all_proxy", settings, [ http_proxy, https_proxy ]);
+    env_proxy_settings!("HTTP_PROXY", settings, [ http_proxy, https_proxy ]);
+    env_proxy_settings!("http_proxy", settings, [ http_proxy, https_proxy ]);
+    env_proxy_settings!("HTTPS_PROXY", settings, [ https_proxy ]);
+    env_proxy_settings!("https_proxy", settings, [ https_proxy ]);
+    Ok(settings.build())
+  }
 
-          // Build host URL
-          let proxy_url = format!("{}://{}", server.protocol, &server.host);
-          let mut host = Url::parse(&proxy_url)?;
-          host.set_port(Some(port))
-            .map_err(|_| crate::api::Error::Url(url::ParseError::InvalidPort))?;
-
-          // Set proxies based on transport type
-          match server.intercepts {
-            Intercepts::Http => {
-              settings = settings.http_proxy(host);
-            },
-            Intercepts::Https => {
-              settings = settings.https_proxy(host);
-            },
-            Intercepts::HttpHttps => {
-              settings = settings.http_proxy(host.clone());
-              settings = settings.https_proxy(host);
-            }
-          }
-          Ok(settings.build())
+  ///
+  fn custom(&self) -> crate::api::Result<ProxySettings> {
+    let mut settings = ProxySettings::builder();
+    if let Some(server) = &self.server {
+      // Add any hosts to bypass proxy server
+      if let Some(bypass) = server.bypass.clone() {
+        if bypass == "*" {
+          return Ok(settings.build())
         } else {
-          Err(crate::api::Error::ProxyServer)
+          for bypass_host in bypass.split(",") {
+            settings = settings.add_no_proxy_host(bypass_host);
+          }
         }
-      },
+      }
+      // Handle port being set to 0
+      let mut server_port = server.port.clone();
+      if let Some(port) = server_port {
+        if port == 0 {
+          server_port = None;
+        }
+      }
+      // Use defaults if port not set
+      let port = if server.protocol.eq_ignore_ascii_case("https") {
+        server_port.unwrap_or(443)
+      } else {
+        server_port.unwrap_or(80)
+      };
+
+      // Build host URL
+      let proxy_url = format!("{}://{}", server.protocol, &server.host);
+      let mut host = Url::parse(&proxy_url)?;
+      host.set_port(Some(port))
+        .map_err(|_| crate::api::Error::Url(url::ParseError::InvalidPort))?;
+
+      if let Some(username) = &server.username {
+        host.set_username(&username)
+          .map_err(|_| crate::api::Error::Auth)?;
+      }
+      host.set_password(server.password.as_deref())
+        .map_err(|_| crate::api::Error::Auth)?;
+
+      // Set proxies based on transport type
+      match server.intercepts {
+        Intercepts::Http => {
+          settings = settings.http_proxy(host);
+        },
+        Intercepts::Https => {
+          settings = settings.https_proxy(host);
+        },
+        Intercepts::HttpHttps => {
+          settings = settings.http_proxy(host.clone());
+          settings = settings.https_proxy(host);
+        }
+      }
+      Ok(settings.build())
+    } else {
+      Err(crate::api::Error::ProxyServer)
     }
   }
 
@@ -1024,6 +1044,7 @@ impl Proxy {
 }
 
 /// Because these tests are setting and using env vars they need to be run sequentially
+/// Without this they will likely clobber each other as rust runs tests in parallel
 /// cargo test --package tauri --lib --features http-api -- api::http --test-threads=1
 #[cfg(test)]
 mod tests {
