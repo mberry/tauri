@@ -162,7 +162,9 @@ impl Client {
     if let Some(proxy) = request.proxy {
       request_builder = request_builder.proxy_settings(proxy.convert()?);
       // Check if any credentials exist
-      if let Some(credentials) = proxy.base64_credentials() {
+      let creds = proxy.base64_credentials();
+      dbg!(&creds);
+      if let Some(credentials) = creds {
         // Add the credentials to the Proxy-Authorization header if it doesn't already exist
         if request.headers.is_none() || request.headers.as_ref().map_or(false, |h| h.0.contains_key("Proxy-Authorization")) {
           request_builder = request_builder.header_append("Proxy-Authorization", format!("Basic {credentials}"))
@@ -1048,9 +1050,15 @@ mod tests {
 
   #[test]
   fn proxy_request() {
-    let client = ClientBuilder::new().build().unwrap();
-    let request = HttpRequestBuilder::new("GET", "http://example.com").unwrap();
+    // let client = ClientBuilder::new().build().unwrap();
+    // let request = HttpRequestBuilder::new("GET", "http://example.com").unwrap();
+    // let mut server = Server::new(
+    //   String::from("http"),
+    //   String::from("localhost"),
+    //   Intercepts::HttpHttps
+    // );
   }
+  // server.set_port
 
   #[test]
   fn test_intercepts_eq() {
