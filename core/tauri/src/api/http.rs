@@ -988,6 +988,7 @@ impl Proxy {
           server_port = None;
         }
       }
+
       // Use defaults if port not set
       let port = if server.protocol.eq_ignore_ascii_case("https") {
         server_port.unwrap_or(443)
@@ -1002,11 +1003,9 @@ impl Proxy {
         .map_err(|_| crate::api::Error::Url(url::ParseError::InvalidPort))?;
 
       if let Some(username) = &server.username {
-        host.set_username(&username)
-          .map_err(|_| crate::api::Error::Auth)?;
+        host.set_username(&username).map_err(|_| crate::api::Error::Auth)?;
       }
-      host.set_password(server.password.as_deref())
-        .map_err(|_| crate::api::Error::Auth)?;
+      host.set_password(server.password.as_deref()).map_err(|_| crate::api::Error::Auth)?;
 
       // Set proxies based on transport type
       match server.intercepts {
