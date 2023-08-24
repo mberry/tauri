@@ -158,9 +158,20 @@ impl Client {
       request_builder = request_builder.timeout(timeout);
     }
 
+    dbg!(&request.proxy);
+
     // If proxy is set add it to the request
-    if let Some(proxy) = request.proxy {
+    if let Some(mut proxy) = request.proxy {
       request_builder = request_builder.proxy_settings(proxy.convert()?);
+
+      if proxy.mode == Mode::Env {
+        let mut server = Server::new("".to_string(), "".to_string(), Intercepts::default());
+        for env_var in [ "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy" ] {
+          env_proxy_auth(&mut server, env_var)?;
+        }
+        proxy.server = Some(server);
+      }
+
       // Check if any credentials exist
       if let Some(credentials) = proxy.base64_credentials() {
         // Add the credentials to the Proxy-Authorization header if it doesn't already exist
@@ -171,6 +182,8 @@ impl Client {
         }
       }
     }
+
+    dbg!(&request_builder.inspect().headers());
 
     let response = if let Some(body) = request.body {
       match body {
@@ -775,7 +788,7 @@ pub struct Proxy {
 }
 
 /// Proxy type to use
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Mode {
   /// Do not proxy any requests
   #[serde(rename = "NO_PROXY")]
@@ -912,13 +925,23 @@ impl Server {
 /// ```
 macro_rules! env_proxy_settings {
   ($env_var:expr, $settings:expr, [ $($method:ident),+ ]) => {
-      if let Ok(url_str) = std::env::var($env_var) {
-          let url = url::Url::parse(&url_str)?;
-          $(
-              $settings = $settings.$method(url.clone());
-          )+
-      }
+    if let Ok(url_str) = std::env::var($env_var) {
+      let url = url::Url::parse(&url_str)?;
+      $(
+          $settings = $settings.$method(url.clone());
+      )+
+    }
   };
+}
+fn env_proxy_auth(server: &mut Server, env_var: &str) -> Result<(), crate::api::Error> {
+  if let Ok(url_str) = std::env::var(env_var) {
+    let url = url::Url::parse(&url_str)?;
+    let username = url.username().to_string();
+    let password = url.password().map(|s| s.to_string());
+    server.username = Some(username);
+    server.password = password;
+  }
+  Ok(())
 }
 
 impl Proxy {
@@ -929,13 +952,13 @@ impl Proxy {
   /// ENV -> Load Envinronment Variables
   ///
   /// CUSTOM -> Use proxy.server fields
-  fn convert(&self) -> crate::api::Result<ProxySettings>  {
+  fn convert(&mut self) -> crate::api::Result<ProxySettings>  {
     match self.mode {
       Mode::NoProxy => {
         let settings = ProxySettings::builder();
         Ok(settings.build())
       },
-      Mode::Env => Proxy::from_env(),
+      Mode::Env => self.from_env(),
       Mode::Custom => self.custom(),
     }
   }
@@ -945,7 +968,7 @@ impl Proxy {
   /// If "no_proxy" is set to "*" all hosts will be bypassed
   /// Otherwise "no_proxy" takes a comma delimited list of hosts to match eg.
   /// "localhost,noproxy.example.com,google.com"
-  fn from_env() -> crate::api::Result<ProxySettings> {
+  fn from_env(&mut self) -> crate::api::Result<ProxySettings> {
     let mut settings = ProxySettings::builder();
     // Check "no_proxy" env var, if it doesn't exit check "NO_PROXY"
     let no_proxy = env::var("no_proxy").or_else(|_| env::var("NO_PROXY"));
@@ -966,6 +989,8 @@ impl Proxy {
     env_proxy_settings!("http_proxy", settings, [ http_proxy, https_proxy ]);
     env_proxy_settings!("HTTPS_PROXY", settings, [ https_proxy ]);
     env_proxy_settings!("https_proxy", settings, [ https_proxy ]);
+
+
     Ok(settings.build())
   }
 
@@ -1060,7 +1085,7 @@ mod tests {
   #[test]
   // No proxy setting
   fn no_proxy() {
-    let proxy = Proxy {mode: Mode::NoProxy,server: None};
+    let mut proxy = Proxy {mode: Mode::NoProxy,server: None};
     let proxy_settings = proxy.convert().unwrap();
     let http_destination = Url::parse("http://example.com/dest").unwrap();
     let https_destination = Url::parse("httpp://example.com/dest").unwrap();
@@ -1071,7 +1096,7 @@ mod tests {
   #[test]
   // Checks no_proxy="*" env var disables proxying
   fn env_bypass_all() {
-    let proxy = Proxy {mode: Mode::Env, server: None};
+    let mut proxy = Proxy {mode: Mode::Env, server: None};
     std::env::set_var("no_proxy", "*");
     let proxy_settings = proxy.convert().unwrap();
 
@@ -1085,7 +1110,7 @@ mod tests {
   #[test]
   // Checks no_proxy="*" env var disables proxying
   fn env_no_proxy_uppercase_bypasslist() {
-    let proxy = Proxy {mode: Mode::Env, server: None};
+    let mut proxy = Proxy {mode: Mode::Env, server: None};
     std::env::set_var("http_proxy", "http://proxy.example.com");
     std::env::set_var("no_proxy", "localhost,dontproxy.example.com");
     let proxy_settings = proxy.convert().unwrap();
@@ -1102,7 +1127,7 @@ mod tests {
   #[test]
   // Ensure lowercase "no_proxy" env var has higher priority over "NO_PROXY"
   fn env_no_proxy_precedence() {
-    let proxy = Proxy {mode: Mode::Env, server: None};
+    let mut proxy = Proxy {mode: Mode::Env, server: None};
     std::env::set_var("HTTP_PROXY", "http://proxy.example.com");
     std::env::set_var("no_proxy", "localhost");
     std::env::set_var("NO_PROXY", "test.example.com"); // Should not be added to the list
@@ -1119,7 +1144,7 @@ mod tests {
   #[test]
   /// Check uppercase http var
   fn http_uppercase_env_proxy() {
-    let proxy = Proxy {mode: Mode::Env, server: None};
+    let mut proxy = Proxy {mode: Mode::Env, server: None};
     std::env::set_var("HTTP_PROXY", "http://localhost:4000");
     let proxy_settings = proxy.convert().unwrap();
     let url = Url::parse("http://neverssl.com").unwrap();
@@ -1129,7 +1154,7 @@ mod tests {
   #[test]
   /// Check lowercase http var
   fn http_lowercase_env_proxy() {
-    let proxy = Proxy {mode: Mode::Env, server: None};
+    let mut proxy = Proxy {mode: Mode::Env, server: None};
     std::env::set_var("http_proxy", "http://localhost:4000");
     let proxy_settings = proxy.convert().unwrap();
     let url = Url::parse("http://neverssl.com").unwrap();
@@ -1139,7 +1164,7 @@ mod tests {
   #[test]
   /// Upper case var takes precedence
   fn http_precedence_env_proxy() {
-    let proxy = Proxy {mode: Mode::Env, server: None};
+    let mut proxy = Proxy {mode: Mode::Env, server: None};
     std::env::set_var("HTTP_PROXY", "http://localhost:3000/");
     std::env::set_var("http_proxy", "http://localhost:4000/");
     let proxy_settings = proxy.convert().unwrap();
@@ -1150,7 +1175,7 @@ mod tests {
   #[test]
   /// Check uppercase http var
   fn https_uppercase_env_proxy() {
-    let proxy = Proxy {mode: Mode::Env, server: None};
+    let mut proxy = Proxy {mode: Mode::Env, server: None};
     std::env::set_var("HTTPS_PROXY", "http://localhost:4000");
     let proxy_settings = proxy.convert().unwrap();
     let url = Url::parse("https://content.example.com").unwrap();
@@ -1160,7 +1185,7 @@ mod tests {
   #[test]
   /// Check lowercase https var
   fn https_lowercase_env_proxy() {
-    let proxy = Proxy {mode: Mode::Env, server: None};
+    let mut proxy = Proxy {mode: Mode::Env, server: None};
     std::env::set_var("https_proxy", "http://localhost:4000");
     let proxy_settings = proxy.convert().unwrap();
     let url = Url::parse("https://content.example.com").unwrap();
@@ -1170,7 +1195,7 @@ mod tests {
   #[test]
   /// Upper case var takes precedence
   fn https_precedence_env_proxy() {
-    let proxy = Proxy {mode: Mode::Env, server: None};
+    let mut proxy = Proxy {mode: Mode::Env, server: None};
     std::env::set_var("HTTPS_PROXY", "http://localhost:3000/");
     std::env::set_var("https_proxy", "http://localhost:4000/");
     let proxy_settings = proxy.convert().unwrap();
@@ -1188,7 +1213,7 @@ mod tests {
     );
     server.set_port(9000);
 
-    let proxy = Proxy {
+    let mut proxy = Proxy {
       mode: Mode::Custom,
       server: Some(server)
     };
@@ -1202,7 +1227,7 @@ mod tests {
   #[test]
   // Check HTTP destinations only are proxied
   fn http_custom_proxy() {
-    let proxy = Proxy {
+    let mut proxy = Proxy {
       mode: Mode::Custom,
       server: Some(Server::new(
         String::from("http"),
@@ -1221,7 +1246,7 @@ mod tests {
   #[test]
   // Check HTTPS destinations only are proxied
   fn https_custom_proxy() {
-    let proxy = Proxy {
+    let mut proxy = Proxy {
       mode: Mode::Custom,
       server: Some(Server::new(
         String::from("http"),
@@ -1240,7 +1265,7 @@ mod tests {
   #[test]
   // Check both HTTP and HTTPS destinations are proxied
   fn http_https_custom_proxy() {
-    let proxy = Proxy {
+    let mut proxy = Proxy {
       mode: Mode::Custom,
       server: Some(Server::new(
         String::from("http"),
