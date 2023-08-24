@@ -170,6 +170,7 @@ impl Client {
       }
     }
     dbg!(&request.headers);
+
     let response = if let Some(body) = request.body {
       match body {
         Body::Bytes(data) => request_builder.body(attohttpc::body::Bytes(data)).danger_accept_invalid_certs(request.accept_invalid_certs.unwrap_or(false)).allow_compression(request.allow_compression.unwrap_or(true)).send()?,
@@ -967,7 +968,7 @@ impl Proxy {
     Ok(settings.build())
   }
 
-  ///
+  /// Custom proxy configuation
   fn custom(&self) -> crate::api::Result<ProxySettings> {
     let mut settings = ProxySettings::builder();
     if let Some(server) = &self.server {
@@ -1024,6 +1025,7 @@ impl Proxy {
   /// Returns the credentials formatted for Basic Auth in base64
   /// eg. user:pass
   pub fn base64_credentials(&self) -> Option<String> {
+    dbg!("base64_credentials", &self);
     if let Some(server) = self.server.clone() {
       if let Some(username) = server.username {
         let password = &server.password.unwrap_or("".to_string());
@@ -1043,6 +1045,12 @@ impl Proxy {
 #[cfg(test)]
 mod tests {
   use crate::api::http::*;
+
+  #[test]
+  fn proxy_request() {
+    let client = ClientBuilder::new().build().unwrap();
+    let request = HttpRequestBuilder::new("GET", "http://example.com").unwrap();
+  }
 
   #[test]
   fn test_intercepts_eq() {
