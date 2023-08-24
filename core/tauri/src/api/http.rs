@@ -161,20 +161,6 @@ impl Client {
     if let Some(proxy) = request.proxy {
       let settings = proxy.convert()?;
       request_builder = request_builder.proxy_settings(settings);
-
-      // Add Proxy auth headers if they don't already exist
-      if let Some(headers) = &request.headers {
-        if !headers.0.contains_key("Proxy-Authorization") {
-          if let Some(server) = proxy.server {
-            // Assumes password exists if username exists
-            if let Some(username) = server.username {
-              let password = server.password.unwrap_or("".to_string());
-              let credentials = base64::encode(format!("{username}:{password}"));
-              request_builder = request_builder.header_append("Proxy-Authorization", format!("Basic {credentials}"))
-            }
-          }
-        }
-      }
     }
 
     let response = if let Some(body) = request.body {
