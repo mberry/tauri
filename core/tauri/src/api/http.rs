@@ -909,9 +909,7 @@ impl Server {
 /// ```
 macro_rules! env_proxy_settings {
   ($env_var:expr, $settings:expr, [ $($method:ident),+ ]) => {
-      println!("Parsing env var: {}", $env_var);
       if let Ok(url_str) = std::env::var($env_var) {
-        println!("Value: {}", url_str);
           let url = url::Url::parse(&url_str)?;
           $(
               $settings = $settings.$method(url.clone());
