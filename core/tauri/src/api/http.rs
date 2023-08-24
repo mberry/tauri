@@ -158,11 +158,12 @@ impl Client {
       request_builder = request_builder.timeout(timeout);
     }
 
+    // If proxy is set add it to the request
     if let Some(proxy) = request.proxy {
-      let settings = proxy.convert()?;
-      request_builder = request_builder.proxy_settings(settings);
-      // Add Proxy auth headers if they don't already exist
+      request_builder = request_builder.proxy_settings(proxy.convert()?);
+      // Check if any credentials exist
       if let Some(credentials) = proxy.base64_credentials() {
+        // Add the credentials to the Proxy-Authorization header if it doesn't already exist
         if request.headers.is_none() || request.headers.as_ref().map_or(false, |h| h.0.contains_key("Proxy-Authorization")) {
           request_builder = request_builder.header_append("Proxy-Authorization", format!("Basic {credentials}"))
         }
@@ -1016,7 +1017,6 @@ impl Proxy {
       } else {
         None
       }
-      // Assumes password exists if username exists
     } else {
       None
     }
@@ -1040,6 +1040,7 @@ mod tests {
   }
 
   #[test]
+  // No proxy setting
   fn no_proxy() {
     let proxy = Proxy {mode: Mode::NoProxy,server: None};
     let proxy_settings = proxy.convert().unwrap();
@@ -1050,7 +1051,8 @@ mod tests {
   }
 
   #[test]
-  fn bypass_all_env() {
+  // Checks no_proxy="*" env var disables proxying
+  fn env_bypass_all() {
     let proxy = Proxy {mode: Mode::Env, server: None};
     std::env::set_var("no_proxy", "*");
     let proxy_settings = proxy.convert().unwrap();
@@ -1063,6 +1065,24 @@ mod tests {
   }
 
   #[test]
+  // Checks no_proxy="*" env var disables proxying
+  fn env_no_proxy_uppercase_bypasslist() {
+    let proxy = Proxy {mode: Mode::Env, server: None};
+    std::env::set_var("http_proxy", "http://proxy.example.com");
+    std::env::set_var("no_proxy", "localhost,dontproxy.example.com");
+    let proxy_settings = proxy.convert().unwrap();
+
+    let bypass1 = Url::parse("http://localhost:5005/dest").unwrap();
+    let bypass2 = Url::parse("https://dontproxy.example.com/dest").unwrap();
+    let proxied = Url::parse("https://google.com").unwrap();
+
+    assert!(proxy_settings.for_url(&bypass1).is_none());
+    assert!(proxy_settings.for_url(&bypass2).is_none());
+    assert!(proxy_settings.for_url(&proxied).is_some());
+  }
+
+  #[test]
+  // Ensure lowercase "no_proxy" env var has higher priority over "NO_PROXY"
   fn env_no_proxy_precedence() {
     let proxy = Proxy {mode: Mode::Env, server: None};
     std::env::set_var("HTTP_PROXY", "http://proxy.example.com");
@@ -1141,16 +1161,29 @@ mod tests {
   }
 
   #[test]
-  fn http_env_proxy() {
-    let proxy = Proxy {mode: Mode::Env, server: None};
-    std::env::set_var("HTTP_PROXY", "http://localhost:4000");
-    let proxy_settings = proxy.convert().unwrap();
-    let url = Url::parse("http://neverssl.com").unwrap();
-    assert!(proxy_settings.for_url(&url).is_some());
-  }
-
-  #[test]
+  /// Check port modification works
   fn set_port() {
+    let mut server = Server::new(
+      String::from("http"),
+      String::from("proxy.example.com"),
+      Intercepts::Http
+    );
+    server.set_port(9000);
+
+    let proxy = Proxy {
+      mode: Mode::Custom,
+      server: Some(server)
+    };
+    // HTTP destinations are proxied
+    let proxy_settings = proxy.convert().unwrap();
+    let destination = Url::parse("http://example.com/dest").unwrap();
+    let proxy_url = Url::parse("http://proxy.example.com:9000").unwrap();
+    assert_eq!(proxy_settings.for_url(&destination).unwrap(), &proxy_url);
+  }
+
+  #[test]
+  // Check HTTP destinations only are proxied
+  fn http_custom_proxy() {
     let proxy = Proxy {
       mode: Mode::Custom,
       server: Some(Server::new(
@@ -1159,39 +1192,17 @@ mod tests {
         Intercepts::Http
       ))
     };
-    // HTTP destinations are proxied
-    let mut proxy_settings = proxy.convert().unwrap();
-    let mut destination = Url::parse("http://example.com/dest").unwrap();
-    assert!(proxy_settings.for_url(&destination).is_some());
 
-    destination = Url::parse("https://google.com").unwrap();
-    proxy_settings = proxy.convert().unwrap();
-    assert!(proxy_settings.for_url(&destination).is_none());
+    let proxy_settings = proxy.convert().unwrap();
+    let http_destination = Url::parse("http://example.com/dest").unwrap();
+    let https_destination = Url::parse("https://google.com").unwrap();
+    assert!(proxy_settings.for_url(&http_destination).is_some());
+    assert!(proxy_settings.for_url(&https_destination).is_none());
   }
 
   #[test]
-  fn http_proxy() {
-    let proxy = Proxy {
-      mode: Mode::Custom,
-      server: Some(Server::new(
-        String::from("http"),
-        String::from("proxy.example.com"),
-        Intercepts::Http
-      ))
-    };
-
-    // HTTP destinations are proxied
-    let mut proxy_settings = proxy.convert().unwrap();
-    let mut destination = Url::parse("http://example.com/dest").unwrap();
-    assert!(proxy_settings.for_url(&destination).is_some());
-
-    destination = Url::parse("https://google.com").unwrap();
-    proxy_settings = proxy.convert().unwrap();
-    assert!(proxy_settings.for_url(&destination).is_none());
-  }
-
-  #[test]
-  fn https_proxy() {
+  // Check HTTPS destinations only are proxied
+  fn https_custom_proxy() {
     let proxy = Proxy {
       mode: Mode::Custom,
       server: Some(Server::new(
@@ -1201,18 +1212,16 @@ mod tests {
       ))
     };
 
-    // HTTP destinations not proxied
-    let mut proxy_settings = proxy.convert().unwrap();
-    let mut destination = Url::parse("http://example.com/dest").unwrap();
-    assert!(proxy_settings.for_url(&destination).is_none());
-
-    destination = Url::parse("https://google.com").unwrap();
-    proxy_settings = proxy.convert().unwrap();
-    assert!(proxy_settings.for_url(&destination).is_some());
+    let proxy_settings = proxy.convert().unwrap();
+    let http_destination = Url::parse("http://example.com/dest").unwrap();
+    let https_destination = Url::parse("https://google.com").unwrap();
+    assert!(proxy_settings.for_url(&http_destination).is_none());
+    assert!(proxy_settings.for_url(&https_destination).is_some());
   }
 
   #[test]
-  fn http_https_proxy() {
+  // Check both HTTP and HTTPS destinations are proxied
+  fn http_https_custom_proxy() {
     let proxy = Proxy {
       mode: Mode::Custom,
       server: Some(Server::new(
@@ -1222,33 +1231,31 @@ mod tests {
       ))
     };
 
-    // Both are proxied
     let proxy_settings = proxy.convert().unwrap();
-    let http_url = Url::parse("http://example.com/dest").unwrap();
-    assert!(proxy_settings.for_url(&http_url).is_some());
-    let https_url = Url::parse("https://google.com").unwrap();
-    assert!(proxy_settings.for_url(&https_url).is_some());
+    let http_destination = Url::parse("http://example.com/dest").unwrap();
+    let https_destination = Url::parse("https://google.com").unwrap();
+    assert!(proxy_settings.for_url(&http_destination).is_some());
+    assert!(proxy_settings.for_url(&https_destination).is_some());
   }
 
   #[test]
+  // Checks base_64 Proxy-Authorization credentials match, includes empty password
   fn auth_proxy() {
     let mut server = Server::new(
       String::from("http"),
       String::from("proxy.example.com"),
       Intercepts::HttpHttps
     );
-    server.username = Some("user".to_string());
-    server.password = Some("pass".to_string());
-    let proxy = Proxy {
-      mode: Mode::Custom,
-      server: Some(server)
-    };
-    // Both are proxied
-    let proxy_settings = proxy.convert().unwrap();
-    let http_url = Url::parse("http://example.com/dest").unwrap();
-    assert!(proxy_settings.for_url(&http_url).is_some());
-    let https_url = Url::parse("https://google.com").unwrap();
-    assert!(proxy_settings.for_url(&https_url).is_some());
+
+    // user:pass
+    server.set_auth("user".to_string(), "pass".to_string());
+    let proxy = Proxy {mode: Mode::Custom, server: Some(server.clone())};
+    assert_eq!("dXNlcjpwYXNz", &proxy.base64_credentials().unwrap());
+
+    // user:
+    server.set_auth("user".to_string(), "".to_string());
+    let proxy = Proxy {mode: Mode::Custom, server: Some(server.clone())};
+    assert_eq!("dXNlcjo=", &proxy.base64_credentials().unwrap());
   }
 }
 
