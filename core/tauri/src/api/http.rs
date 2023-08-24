@@ -942,23 +942,15 @@ impl Proxy {
       },
       Mode::Env => {
         let mut settings = ProxySettings::builder();
-        // If lowercase no_proxy == "*"" disable all proxying
-        // Otherwise set bypass list
-        if let Ok(disable) = env::var("no_proxy") {
-          if disable == "*" {
+        // Check "no_proxy" env var, if it doesn't exit check "NO_PROXY"
+        let no_proxy = env::var("no_proxy").or_else(|_| env::var("NO_PROXY"));
+        if let Ok(bypass_list) = no_proxy {
+          // If any value is present check for * to bypass all hosts
+          if bypass_list == "*" {
             return Ok(settings.build())
           } else {
-            for bypass_host in disable.split(",") {
-              settings = settings.add_no_proxy_host(bypass_host);
-            }
-          }
-        // Else if uppercase
-        } else if let Ok(disable) = env::var("NO_PROXY") {
-          if disable == "*" {
-            // Return no_proxy settings
-            return Ok(ProxySettings::builder().build())
-          } else {
-            for bypass_host in disable.split(",") {
+            // Otherwise split the comma delimited list and add them to be bypassed
+            for bypass_host in bypass_list.split(",") {
               settings = settings.add_no_proxy_host(bypass_host);
             }
           }
@@ -1057,6 +1049,35 @@ mod tests {
     let https_destination = Url::parse("httpp://example.com/dest").unwrap();
     assert!(proxy_settings.for_url(&http_destination).is_none());
     assert!(proxy_settings.for_url(&https_destination).is_none());
+  }
+
+  #[test]
+  fn bypass_all_env() {
+    let proxy = Proxy {mode: Mode::Env, server: None};
+    std::env::set_var("no_proxy", "*");
+    let proxy_settings = proxy.convert().unwrap();
+
+    let http_destination = Url::parse("http://example.com/dest").unwrap();
+    let https_destination = Url::parse("https://example.com/dest").unwrap();
+
+    assert!(proxy_settings.for_url(&http_destination).is_none());
+    assert!(proxy_settings.for_url(&https_destination).is_none());
+  }
+
+  #[test]
+  fn env_no_proxy_precedence() {
+    let proxy = Proxy {mode: Mode::Env, server: None};
+    std::env::set_var("HTTP_PROXY", "http://proxy.example.com");
+    std::env::set_var("no_proxy", "localhost");
+    std::env::set_var("NO_PROXY", "test.example.com"); // Should not be added to the list
+    let proxy_settings = proxy.convert().unwrap();
+
+    let direct_destination = Url::parse("http://localhost:4040").unwrap();
+    let proxied_destination = Url::parse("http://test.example.com:8080").unwrap();
+
+    assert!(proxy_settings.for_url(&proxied_destination).is_some());
+    let dd = proxy_settings.for_url(&direct_destination);
+    assert!(dd.is_none());
   }
 
   #[test]
