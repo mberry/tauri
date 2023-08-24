@@ -163,7 +163,7 @@ impl Client {
       request_builder = request_builder.proxy_settings(settings);
     }
 
-    dbg!(&request_builder.inspect());
+    dbg!(&request_builder.inspect().url());
 
     let response = if let Some(body) = request.body {
       match body {
@@ -1015,6 +1015,8 @@ impl Proxy {
   }
 }
 
+/// Because these tests are setting and using env vars they need to be run sequentially
+/// cargo test --package tauri --lib --features http-api -- api::http --test-threads=1
 #[cfg(test)]
 mod tests {
   use crate::api::http::*;
@@ -1212,6 +1214,27 @@ mod tests {
       ))
     };
 
+    // Both are proxied
+    let proxy_settings = proxy.convert().unwrap();
+    let http_url = Url::parse("http://example.com/dest").unwrap();
+    assert!(proxy_settings.for_url(&http_url).is_some());
+    let https_url = Url::parse("https://google.com").unwrap();
+    assert!(proxy_settings.for_url(&https_url).is_some());
+  }
+
+  #[test]
+  fn auth_proxy() {
+    let mut server = Server::new(
+      String::from("http"),
+      String::from("proxy.example.com"),
+      Intercepts::HttpHttps
+    );
+    server.username = Some("user".to_string());
+    server.password = Some("pass".to_string());
+    let mut proxy = Proxy {
+      mode: Mode::Custom,
+      server: Some(server)
+    };
     // Both are proxied
     let proxy_settings = proxy.convert().unwrap();
     let http_url = Url::parse("http://example.com/dest").unwrap();
