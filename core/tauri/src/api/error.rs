@@ -6,6 +6,9 @@
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
+  /// Proxy Auth
+  #[error("Invalid Proxy Auth Configuarion")]
+  Auth,
   /// Command error.
   #[error("Command Error: {0}")]
   Command(String),
