@@ -870,6 +870,10 @@ impl Proxy {
   fn custom(&self) -> crate::api::Result<ProxySettings> {
     let mut settings = ProxySettings::builder();
     if let Some(server) = &self.server {
+      // If server host is empty, disable Proxy
+      if server.host.is_empty() {
+        return Ok(settings.build())
+      }
       // Add any hosts to bypass proxy server
       if let Some(bypass) = server.bypass.clone() {
         if bypass == "*" {
