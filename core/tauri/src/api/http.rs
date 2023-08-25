@@ -158,8 +158,6 @@ impl Client {
       request_builder = request_builder.timeout(timeout);
     }
 
-    dbg!(&request.proxy);
-
     // If proxy is set add it to the request
     if let Some(mut proxy) = request.proxy {
       let settings = proxy.convert()?;
@@ -195,8 +193,6 @@ impl Client {
         }
       }
     }
-
-    dbg!(&request_builder.inspect().headers());
 
     let response = if let Some(body) = request.body {
       match body {
@@ -1097,7 +1093,6 @@ mod tests {
     let proxy = Proxy {mode: Mode::Custom, server: Some(server)};
     request_builder = request_builder.proxy(proxy);
     let response = client.send(request_builder).await.unwrap();
-    dbg!(response);
   }
 
   #[tokio::test]
@@ -1109,8 +1104,6 @@ mod tests {
     let proxy = Proxy {mode: Mode::Custom, server: Some(server)};
     request_builder = request_builder.proxy(proxy);
     let response = client.send(request_builder).await.unwrap();
-    dbg!(response.status());
-    dbg!(response.2);
   }
 
   #[test]
