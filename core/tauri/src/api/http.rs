@@ -12,7 +12,7 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use url::Url;
 use attohttpc::ProxySettings;
 
-use std::{collections::HashMap, path::PathBuf, time::Duration, env};
+use std::{collections::HashMap, path::PathBuf, time::Duration, env, ops::Not};
 
 #[cfg(feature = "reqwest-client")]
 pub use reqwest::header;
@@ -169,15 +169,16 @@ impl Client {
       if proxy.mode == Mode::Env {
         // Check if request is to be proxied
         if settings.for_url(&request.url).is_some() {
+          let mut server = Server::new("".to_string(), "".to_string(), Intercepts::default());
           // Change priority list based on type of request
           let priority_list = match request.url.scheme() {
             "http" => vec![ "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy" ],
             "https" => vec![ "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy" ],
             _ => vec![]
           };
-          let mut server = Server::new("".to_string(), "".to_string(), Intercepts::default());
+          // Parse variables
           for env_var in priority_list {
-            env_proxy_auth(&mut server, env_var)?;
+            server.parse_env_proxy_auth(env_var)?;
           }
           // Set server to populate auth headers
           proxy.server = Some(server);
@@ -187,7 +188,7 @@ impl Client {
       // Check if any credentials exist
       if let Some(credentials) = proxy.base64_credentials() {
         // Add the credentials to the Proxy-Authorization header if it doesn't already exist
-        if let Some(headers) = &request.headers {
+        if let Some(headers) = &request.headers { // Empty headers are still Some()
           if !headers.0.contains_key("Proxy-Authorization") {
             request_builder = request_builder.header_append("Proxy-Authorization", format!("Basic {credentials}"))
           }
@@ -926,6 +927,19 @@ impl Server {
     self.username = Some(username);
     self.password = Some(password);
   }
+
+  /// Checks the environmental variable for user:pass credentials and
+  /// adds them to the Server if they exist
+  fn parse_env_proxy_auth(&mut self, env_var: &str) -> Result<(), crate::api::Error> {
+    if let Ok(url_str) = std::env::var(env_var) {
+      let url = url::Url::parse(&url_str)?;
+      let username = url.username().to_string();
+      let password = url.password().map(|s| s.to_string());
+      self.username = username.is_empty().not().then(|| username);
+      self.password = password;
+    }
+    Ok(())
+  }
 }
 
 /// Sets the proxies based on the environmental variable value
@@ -945,16 +959,7 @@ macro_rules! env_proxy_settings {
     }
   };
 }
-fn env_proxy_auth(server: &mut Server, env_var: &str) -> Result<(), crate::api::Error> {
-  if let Ok(url_str) = std::env::var(env_var) {
-    let url = url::Url::parse(&url_str)?;
-    let username = url.username().to_string();
-    let password = url.password().map(|s| s.to_string());
-    server.username = Some(username);
-    server.password = password;
-  }
-  Ok(())
-}
+
 
 impl Proxy {
   /// Handle Proxy logic and convert struct to attohttpc ProxySettings for the request
@@ -1064,12 +1069,12 @@ impl Proxy {
   /// eg. user:pass
   pub fn base64_credentials(&self) -> Option<String> {
     if let Some(server) = self.server.clone() {
-      if let Some(username) = server.username {
-        let password = &server.password.unwrap_or("".to_string());
-        Some(base64::encode(format!("{username}:{password}")))
-      } else {
-        None
+      if server.username.is_none() && server.password.is_none() {
+        return None
       }
+      let username = &server.username.unwrap_or("".to_string());
+      let password = &server.password.unwrap_or("".to_string());
+      Some(base64::encode(format!("{username}:{password}")))
     } else {
       None
     }
@@ -1083,6 +1088,30 @@ impl Proxy {
 mod tests {
   use crate::api::http::*;
 
+  #[tokio::test]
+  async fn http_proxy_request() {
+    let mut request_builder = HttpRequestBuilder::new("GET", "http://neverssl.com").unwrap();
+    let client = ClientBuilder::new().build().unwrap();
+    let mut server = Server::new(String::from("http"), String::from("localhost"), Intercepts::HttpHttps);
+    server.set_port(8080);
+    let proxy = Proxy {mode: Mode::Custom, server: Some(server)};
+    request_builder = request_builder.proxy(proxy);
+    let response = client.send(request_builder).await.unwrap();
+    dbg!(response);
+  }
+
+  #[tokio::test]
+  async fn https_proxy_request() {
+    let mut request_builder = HttpRequestBuilder::new("GET", "https://google.com").unwrap();
+    let client = ClientBuilder::new().build().unwrap();
+    let mut server = Server::new(String::from("http"), String::from("localhost"), Intercepts::HttpHttps);
+    server.set_port(8080);
+    let proxy = Proxy {mode: Mode::Custom, server: Some(server)};
+    request_builder = request_builder.proxy(proxy);
+    let response = client.send(request_builder).await.unwrap();
+    dbg!(response.status());
+    dbg!(response.2);
+  }
 
   #[test]
   fn test_intercepts_eq() {
