@@ -806,10 +806,12 @@ pub struct Proxy {
 macro_rules! env_proxy_settings {
   ($env_var:expr, $settings:expr, [ $($method:ident),+ ]) => {
     if let Ok(url_str) = std::env::var($env_var) {
-      let url = url::Url::parse(&url_str)?;
-      $(
-          $settings = $settings.$method(url.clone());
-      )+
+      if url_str.is_empty().not() {
+        let url = url::Url::parse(&url_str)?;
+        $(
+            $settings = $settings.$method(url.clone());
+        )+
+      }
     }
   };
 }
